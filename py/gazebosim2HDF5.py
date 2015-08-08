@@ -127,43 +127,81 @@ def main():
     set_num_links = True
     num_links = 0
 
+    set_num_joints = True
+    num_joints = 0
+
     data = {}
     dsets = {}
 
-    for _, msg, _ in bag.read_messages(topics="/gazebo/link_states"):
+    for topic, msg, _ in bag.read_messages():
 
-        if set_num_links:
-            num_links = len(msg.name)
-            set_num_links = False
+        if topic == "/gazebo/link_states":
+            if set_num_links:
+                num_links = len(msg.name)
+                set_num_links = False
 
-        names = getattr(msg, "name")
-        poses = getattr(msg, "pose")
-        twists = getattr(msg, "twist")
+            names = getattr(msg, "name")
+            poses = getattr(msg, "pose")
+            twists = getattr(msg, "twist")
 
-        # Iterate over links
-        for b, name in enumerate(names):
-            state_name = [poses[b].position.x, poses[b].position.y, poses[b].position.z,
-                          poses[b].orientation.x, poses[b].orientation.y, poses[b].orientation.z, poses[b].orientation.w,
-                          twists[b].linear.x, twists[b].linear.y, twists[b].linear.z,
-                          twists[b].angular.x, twists[b].angular.y, twists[b].angular.z]
+            # Iterate over links
+            for b, name in enumerate(names):
+                state_name = [poses[b].position.x, poses[b].position.y, poses[b].position.z,
+                              poses[b].orientation.x, poses[b].orientation.y, poses[b].orientation.z, poses[b].orientation.w,
+                              twists[b].linear.x, twists[b].linear.y, twists[b].linear.z,
+                              twists[b].angular.x, twists[b].angular.y, twists[b].angular.z]
 
-            state_tuple = tuple(state_name)
+                state_tuple = tuple(state_name)
 
-            if name not in data:
-                data[name] = dict(dtype=np.float64, object=[state_tuple])
+                if name not in data:
+                    data[name] = dict(dtype=np.float64, object=[state_tuple])
+                else:
+                    data[name]['object'].append(state_name)
+
+                arr = np.array(**data[name])
+
+                if name not in dsets:
+                    dset = f.create_dataset(name, data=arr, maxshape=(None,13), compression='gzip', compression_opts=9)
+                    dsets[name] = dset
+                else:
+                    h5append(dsets[name], arr)
+
+                del arr
+                data[name]['object'] = []
+
+        if topic == "/soft_hand/joint_states":
+
+            joint_names = getattr(msg, "name")
+            position = getattr(msg, "position")
+
+            if set_num_joints:
+                num_joints = len(msg.name)
+                for name in joint_names:
+                    f.create_group("HandJointNames/" + name)
+                set_num_joints = False
+
+            # Iterate over joints
+            full_joint_state = []
+            for joint in position:
+                full_joint_state.append(joint)
+
+            joint_state_tuple = tuple(full_joint_state)
+
+            if "HandConfigurationData" not in data:
+                data["HandConfigurationData"] = dict(dtype=np.float64, object=[joint_state_tuple])
             else:
-                data[name]['object'].append(state_name)
+                data["HandConfigurationData"]['object'].append(full_joint_state)
 
-            arr = np.array(**data[name])
+            arr = np.array(**data["HandConfigurationData"])
 
-            if name not in dsets:
-                dset = f.create_dataset(name, data=arr, maxshape=(None,13), compression='gzip', compression_opts=9)
-                dsets[name] = dset
+            if "HandConfigurationData" not in dsets:
+                dset = f.create_dataset("HandConfigurationData", data=arr, maxshape=(None, num_joints), compression='gzip', compression_opts=9)
+                dsets["HandConfigurationData"] = dset
             else:
-                h5append(dsets[name], arr)
+                h5append(dsets["HandConfigurationData"], arr)
 
             del arr
-            data[name]['object'] = []
+            data["HandConfigurationData"]['object'] = []
 
     f.close()
 
